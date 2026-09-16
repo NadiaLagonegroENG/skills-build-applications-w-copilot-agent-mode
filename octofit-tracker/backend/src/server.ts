@@ -18,8 +18,6 @@ const baseUrl = codespaceName ? `https://${codespaceName}-8000.app.github.dev` :
 const activityTypes = ['running', 'walking', 'strength'] as const;
 const fitnessLevels = ['beginner', 'intermediate', 'advanced'] as const;
 
-connectDatabase();
-
 app.use(cors());
 app.use(express.json());
 
@@ -147,10 +145,16 @@ const refreshInMemoryLeaderboard = () => {
       teamName: user.teamName,
       points: totals.get(user.id) || 0,
       rank: 0,
-      badge: user.role === 'teacher' ? 'Coach Mentor' : 'Goal Getter'
+      role: user.role,
+      badge: ''
     }))
     .sort((left, right) => right.points - left.points)
-    .map((entry, index) => ({ ...entry, rank: index + 1 }));
+    .map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+      badge: getBadge(entry.role, index + 1)
+    }))
+    .map(({ role, ...entry }) => entry);
 
   memoryStore.teams = memoryStore.teams.map((team) => ({
     ...team,
@@ -345,6 +349,12 @@ app.get('/api/workouts/', readRateLimit, async (request, response) => {
   return respondWithResults(response, workouts);
 });
 
-app.listen(port, () => {
-  console.log(`OctoFit Tracker API listening on ${baseUrl}`);
-});
+async function startServer() {
+  await connectDatabase();
+
+  app.listen(port, () => {
+    console.log(`OctoFit Tracker API listening on ${baseUrl}`);
+  });
+}
+
+startServer();

@@ -52,15 +52,26 @@ async function seedDatabase() {
       sampleTeams.map(({ id: _id, memberIds, ...team }) => ({
         ...team,
         points: 0,
-        memberIds: memberIds.map((memberId) => userIdBySampleId.get(memberId))
+        memberIds: memberIds.flatMap((memberId) => {
+          const resolvedId = userIdBySampleId.get(memberId);
+          return resolvedId ? [resolvedId] : [];
+        })
       }))
     );
 
     await Activity.insertMany(
-      sampleActivities.map(({ id: _id, userId, userName: _userName, ...activity }) => ({
-        ...activity,
-        userId: userIdBySampleId.get(userId)
-      }))
+      sampleActivities.flatMap(({ id: _id, userId, userName: _userName, ...activity }) => {
+        const resolvedId = userIdBySampleId.get(userId);
+
+        if (!resolvedId) {
+          return [];
+        }
+
+        return [{
+          ...activity,
+          userId: resolvedId
+        }];
+      })
     );
 
     await Workout.insertMany(sampleWorkoutPlans.map(({ id: _id, ...workout }) => workout));
