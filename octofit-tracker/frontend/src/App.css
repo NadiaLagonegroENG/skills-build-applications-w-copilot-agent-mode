@@ -1,0 +1,27 @@
+.app-shell {
+  color: #15324b;
+}
+
+.app-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+}
+
+.letter-spaced {
+  letter-spacing: 0.12em;
+}
+
+.env-note code {
+  color: inherit;
+}
+
+.card-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.metric-badge {
+  font-size: 0.9rem;
+}
