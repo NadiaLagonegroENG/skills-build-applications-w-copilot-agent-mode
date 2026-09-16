@@ -5,6 +5,7 @@ const workoutsEndpoint = import.meta.env.VITE_CODESPACE_NAME
   : 'http://localhost:8000/api/workouts/'
 
 const normalizeList = (payload) => (Array.isArray(payload) ? payload : payload?.results ?? [])
+const formatRoleLabel = (role) => role.charAt(0).toUpperCase() + role.slice(1)
 
 function Workouts() {
   const [workouts, setWorkouts] = useState([])
@@ -70,7 +71,10 @@ function Workouts() {
                   <span className="badge text-bg-info text-dark">{workout.targetLevel}</span>
                 </div>
                 <p className="mb-2"><strong>Duration:</strong> {workout.durationMinutes} minutes</p>
-                <p className="mb-2"><strong>Designed for:</strong> {(workout.assignedRoles ?? []).join(', ')}</p>
+                <p className="mb-2">
+                  <strong>Designed for:</strong>{' '}
+                  {(workout.assignedRoles ?? []).map(formatRoleLabel).join(', ')}
+                </p>
                 <p className="mb-0 text-secondary">{workout.description}</p>
               </div>
             </article>

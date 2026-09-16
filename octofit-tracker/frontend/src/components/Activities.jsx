@@ -181,7 +181,7 @@ function Activities() {
                 <p className="mb-2"><strong>Athlete:</strong> {activity.userName || activity.userId}</p>
                 <p className="mb-2"><strong>Duration:</strong> {activity.durationMinutes} minutes</p>
                 <p className="mb-2"><strong>Date:</strong> {activity.date}</p>
-                <p className="mb-0 text-secondary">{activity.note}</p>
+                {activity.note ? <p className="mb-0 text-secondary">{activity.note}</p> : null}
               </div>
             </article>
           </div>

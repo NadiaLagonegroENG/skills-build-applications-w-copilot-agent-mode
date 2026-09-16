@@ -13,6 +13,8 @@ const app = express();
 const port = 8000;
 const codespaceName = process.env.CODESPACE_NAME;
 const baseUrl = codespaceName ? `https://${codespaceName}-8000.app.github.dev` : `http://localhost:${port}`;
+const requestWindowMs = 60_000;
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
 connectDatabase();
 
@@ -46,6 +48,27 @@ const getBadge = (role: string, rank: number) => {
 
   return 'Step Streak';
 };
+
+const createRateLimiter = (maxRequests: number): express.RequestHandler => (request, response, next) => {
+  const key = `${request.ip}:${request.path}`;
+  const now = Date.now();
+  const currentEntry = rateLimitStore.get(key);
+
+  if (!currentEntry || currentEntry.resetAt <= now) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + requestWindowMs });
+    return next();
+  }
+
+  if (currentEntry.count >= maxRequests) {
+    return response.status(429).json({ message: 'Too many requests, please try again shortly.' });
+  }
+
+  currentEntry.count += 1;
+  return next();
+};
+
+const readRateLimit = createRateLimiter(60);
+const writeRateLimit = createRateLimiter(20);
 
 const refreshDatabaseLeaderboard = async () => {
   const [users, activities, teams] = await Promise.all([
@@ -138,7 +161,7 @@ app.get('/api', (_request, response) => {
   });
 });
 
-app.get('/api/users/', async (_request, response) => {
+app.get('/api/users/', readRateLimit, async (_request, response) => {
   if (isDatabaseConnected()) {
     const users = await User.find().sort({ fullName: 1 }).lean();
     return respondWithResults(response, users);
@@ -147,7 +170,7 @@ app.get('/api/users/', async (_request, response) => {
   return respondWithResults(response, memoryStore.users);
 });
 
-app.post('/api/users/', async (request, response) => {
+app.post('/api/users/', writeRateLimit, async (request, response) => {
   const payload = request.body;
 
   if (isDatabaseConnected()) {
@@ -161,7 +184,7 @@ app.post('/api/users/', async (request, response) => {
   return response.status(201).json(user);
 });
 
-app.get('/api/teams/', async (_request, response) => {
+app.get('/api/teams/', readRateLimit, async (_request, response) => {
   if (isDatabaseConnected()) {
     const teams = await Team.find().sort({ points: -1, name: 1 }).lean();
     return respondWithResults(response, teams);
@@ -170,20 +193,33 @@ app.get('/api/teams/', async (_request, response) => {
   return respondWithResults(response, memoryStore.teams);
 });
 
-app.post('/api/teams/', async (request, response) => {
+app.post('/api/teams/', writeRateLimit, async (request, response) => {
   const payload = request.body;
+  const memberIds = Array.isArray(payload.memberIds) ? payload.memberIds : [];
 
   if (isDatabaseConnected()) {
     const team = await Team.create(payload);
+
+    if (memberIds.length > 0) {
+      await User.updateMany({ _id: { $in: memberIds } }, { teamName: payload.name });
+      await refreshDatabaseLeaderboard();
+    }
+
     return response.status(201).json(team);
   }
 
-  const team = { id: `t${memoryStore.teams.length + 1}`, points: 0, ...payload };
+  const team = { id: `t${memoryStore.teams.length + 1}`, points: 0, ...payload, memberIds };
   memoryStore.teams.push(team);
+  if (memberIds.length > 0) {
+    memoryStore.users = memoryStore.users.map((user) =>
+      memberIds.includes(user.id) ? { ...user, teamName: payload.name } : user
+    );
+  }
+  refreshInMemoryLeaderboard();
   return response.status(201).json(team);
 });
 
-app.get('/api/activities/', async (_request, response) => {
+app.get('/api/activities/', readRateLimit, async (_request, response) => {
   if (isDatabaseConnected()) {
     const [activities, users] = await Promise.all([
       Activity.find().sort({ createdAt: -1 }).lean(),
@@ -203,13 +239,17 @@ app.get('/api/activities/', async (_request, response) => {
   return respondWithResults(response, memoryStore.activities);
 });
 
-app.post('/api/activities/', async (request, response) => {
+app.post('/api/activities/', writeRateLimit, async (request, response) => {
   const payload = request.body;
 
   if (isDatabaseConnected()) {
     const activity = await Activity.create(payload);
+    const user = await User.findById(payload.userId).lean();
     await refreshDatabaseLeaderboard();
-    return response.status(201).json(activity);
+    return response.status(201).json({
+      ...activity.toObject(),
+      userName: user?.fullName || String(payload.userId)
+    });
   }
 
   const matchingUser = memoryStore.users.find((user) => user.id === payload.userId);
@@ -224,7 +264,7 @@ app.post('/api/activities/', async (request, response) => {
   return response.status(201).json(activity);
 });
 
-app.get('/api/leaderboard/', async (_request, response) => {
+app.get('/api/leaderboard/', readRateLimit, async (_request, response) => {
   if (isDatabaseConnected()) {
     const entries = await LeaderboardEntry.find().sort({ rank: 1 }).lean();
     return respondWithResults(response, entries);
@@ -233,7 +273,7 @@ app.get('/api/leaderboard/', async (_request, response) => {
   return respondWithResults(response, memoryStore.leaderboard);
 });
 
-app.get('/api/workouts/', async (request, response) => {
+app.get('/api/workouts/', readRateLimit, async (request, response) => {
   const targetLevel = request.query.targetLevel;
 
   if (isDatabaseConnected()) {
