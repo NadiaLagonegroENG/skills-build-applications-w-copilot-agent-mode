@@ -304,10 +304,15 @@ app.post('/api/activities/', writeRateLimit, async (request, response) => {
   }
 
   const matchingUser = memoryStore.users.find((user) => user.id === payload.userId);
+
+  if (!matchingUser) {
+    return response.status(404).json({ message: 'No user exists for the provided userId.' });
+  }
+
   const activity = {
     id: `a${memoryStore.activities.length + 1}`,
     ...payload,
-    userName: matchingUser?.fullName || 'Unknown athlete'
+    userName: matchingUser.fullName
   };
 
   memoryStore.activities.unshift(activity);

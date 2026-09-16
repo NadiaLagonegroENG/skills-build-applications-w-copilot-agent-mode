@@ -120,7 +120,7 @@ export const sampleLeaderboardEntries = [
     teamName: 'Staff Coaches',
     points: 98,
     rank: 1,
-    badge: 'Consistency Captain'
+    badge: 'Coach Mentor'
   },
   {
     id: 'l2',
