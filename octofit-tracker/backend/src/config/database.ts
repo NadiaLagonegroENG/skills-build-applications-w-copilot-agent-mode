@@ -3,16 +3,27 @@ import mongoose from 'mongoose';
 const connectionString = process.env.MONGODB_URI || 'mongodb://localhost:27017/octofit_db';
 const db = mongoose.connection;
 
-mongoose
-  .connect(connectionString)
-  .then(() => {
+export const isDatabaseConnected = () => db.readyState === 1;
+
+export async function connectDatabase() {
+  if (isDatabaseConnected()) {
+    return db;
+  }
+
+  try {
+    await mongoose.connect(connectionString, { serverSelectionTimeoutMS: 3000 });
     console.log('Connected to octofit_db');
-  })
-  .catch((error) => {
-    console.error('Error connecting to octofit_db:', error);
-    process.exit(1);
-  });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`Unable to connect to octofit_db, using fallback data: ${message}`);
+  }
 
-db.on('error', console.error.bind(console, 'connection error:'));
+  return db;
+}
 
+db.on('error', (error) => {
+  console.warn(`connection error: ${error.message}`);
+});
+
+export { connectionString };
 export default db;
