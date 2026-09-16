@@ -1,5 +1,7 @@
 import cors from 'cors';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
+import mongoose from 'mongoose';
 
 import { connectDatabase, isDatabaseConnected } from './config/database';
 import { sampleActivities, sampleLeaderboardEntries, sampleTeams, sampleUsers, sampleWorkoutPlans } from './data/sampleData';
@@ -13,8 +15,8 @@ const app = express();
 const port = 8000;
 const codespaceName = process.env.CODESPACE_NAME;
 const baseUrl = codespaceName ? `https://${codespaceName}-8000.app.github.dev` : `http://localhost:${port}`;
-const requestWindowMs = 60_000;
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const activityTypes = ['running', 'walking', 'strength'] as const;
+const fitnessLevels = ['beginner', 'intermediate', 'advanced'] as const;
 
 connectDatabase();
 
@@ -49,26 +51,34 @@ const getBadge = (role: string, rank: number) => {
   return 'Step Streak';
 };
 
-const createRateLimiter = (maxRequests: number): express.RequestHandler => (request, response, next) => {
-  const key = `${request.ip}:${request.path}`;
-  const now = Date.now();
-  const currentEntry = rateLimitStore.get(key);
+const readRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
-  if (!currentEntry || currentEntry.resetAt <= now) {
-    rateLimitStore.set(key, { count: 1, resetAt: now + requestWindowMs });
-    return next();
-  }
+const writeRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
-  if (currentEntry.count >= maxRequests) {
-    return response.status(429).json({ message: 'Too many requests, please try again shortly.' });
-  }
+const sanitizeMemberIds = (value: unknown) =>
+  Array.isArray(value)
+    ? value.filter(
+        (memberId): memberId is string =>
+          typeof memberId === 'string' && mongoose.Types.ObjectId.isValid(memberId)
+      )
+    : [];
 
-  currentEntry.count += 1;
-  return next();
-};
+const getTargetLevel = (value: unknown) =>
+  typeof value === 'string' && fitnessLevels.includes(value as (typeof fitnessLevels)[number])
+    ? value
+    : undefined;
 
-const readRateLimit = createRateLimiter(60);
-const writeRateLimit = createRateLimiter(20);
+const normalizeText = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
 
 const refreshDatabaseLeaderboard = async () => {
   const [users, activities, teams] = await Promise.all([
@@ -171,7 +181,14 @@ app.get('/api/users/', readRateLimit, async (_request, response) => {
 });
 
 app.post('/api/users/', writeRateLimit, async (request, response) => {
-  const payload = request.body;
+  const payload = {
+    fullName: normalizeText(request.body.fullName),
+    email: normalizeText(request.body.email),
+    role: request.body.role === 'teacher' ? 'teacher' : 'student',
+    fitnessLevel: getTargetLevel(request.body.fitnessLevel) || 'beginner',
+    goal: normalizeText(request.body.goal),
+    teamName: normalizeText(request.body.teamName)
+  };
 
   if (isDatabaseConnected()) {
     const user = await User.create(payload);
@@ -194,16 +211,23 @@ app.get('/api/teams/', readRateLimit, async (_request, response) => {
 });
 
 app.post('/api/teams/', writeRateLimit, async (request, response) => {
-  const payload = request.body;
-  const memberIds = Array.isArray(payload.memberIds) ? payload.memberIds : [];
+  const memberIds = sanitizeMemberIds(request.body.memberIds);
+  const payload = {
+    name: normalizeText(request.body.name),
+    description: normalizeText(request.body.description),
+    coach: normalizeText(request.body.coach),
+    goal: normalizeText(request.body.goal),
+    memberIds
+  };
 
   if (isDatabaseConnected()) {
     const team = await Team.create(payload);
 
     if (memberIds.length > 0) {
       await User.updateMany({ _id: { $in: memberIds } }, { teamName: payload.name });
-      await refreshDatabaseLeaderboard();
     }
+
+    await refreshDatabaseLeaderboard();
 
     return response.status(201).json(team);
   }
@@ -240,9 +264,30 @@ app.get('/api/activities/', readRateLimit, async (_request, response) => {
 });
 
 app.post('/api/activities/', writeRateLimit, async (request, response) => {
-  const payload = request.body;
+  const userId = normalizeText(request.body.userId);
+  const type = activityTypes.includes(request.body.type) ? request.body.type : 'running';
+  const payload = {
+    userId,
+    type,
+    durationMinutes: Number(request.body.durationMinutes),
+    points: Number(request.body.points),
+    date: normalizeText(request.body.date),
+    note: normalizeText(request.body.note)
+  };
+
+  if (!payload.userId) {
+    return response.status(400).json({ message: 'A userId is required.' });
+  }
+
+  if (!Number.isFinite(payload.durationMinutes) || !Number.isFinite(payload.points)) {
+    return response.status(400).json({ message: 'Duration and points must be numeric values.' });
+  }
 
   if (isDatabaseConnected()) {
+    if (!mongoose.Types.ObjectId.isValid(payload.userId)) {
+      return response.status(400).json({ message: 'The userId must be a valid ObjectId.' });
+    }
+
     const activity = await Activity.create(payload);
     const user = await User.findById(payload.userId).lean();
     await refreshDatabaseLeaderboard();
@@ -274,15 +319,15 @@ app.get('/api/leaderboard/', readRateLimit, async (_request, response) => {
 });
 
 app.get('/api/workouts/', readRateLimit, async (request, response) => {
-  const targetLevel = request.query.targetLevel;
+  const targetLevel = getTargetLevel(request.query.targetLevel);
 
   if (isDatabaseConnected()) {
-    const filter = typeof targetLevel === 'string' ? { targetLevel } : {};
+    const filter = targetLevel ? { targetLevel } : {};
     const workouts = await Workout.find(filter).sort({ durationMinutes: 1 }).lean();
     return respondWithResults(response, workouts);
   }
 
-  const workouts = typeof targetLevel === 'string'
+  const workouts = targetLevel
     ? memoryStore.workouts.filter((workout) => workout.targetLevel === targetLevel)
     : memoryStore.workouts;
 

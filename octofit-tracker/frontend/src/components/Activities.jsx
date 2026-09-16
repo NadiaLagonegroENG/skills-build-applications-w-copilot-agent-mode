@@ -64,6 +64,11 @@ function Activities() {
           points: Number(formData.points),
         }),
       })
+
+      if (!response.ok) {
+        throw new Error('Activity request failed')
+      }
+
       const createdActivity = await response.json()
       setActivities((currentActivities) => [createdActivity, ...currentActivities])
       setFormData((current) => ({ ...current, durationMinutes: 20, points: 25, note: '' }))

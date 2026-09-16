@@ -44,6 +44,11 @@ function Users() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       })
+
+      if (!response.ok) {
+        throw new Error('Profile request failed')
+      }
+
       const createdUser = await response.json()
       setUsers((currentUsers) =>
         [...currentUsers, createdUser].sort((left, right) => left.fullName.localeCompare(right.fullName)),

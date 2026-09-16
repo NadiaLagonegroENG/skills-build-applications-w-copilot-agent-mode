@@ -43,6 +43,11 @@ function Teams() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
       })
+
+      if (!response.ok) {
+        throw new Error('Team request failed')
+      }
+
       const createdTeam = await response.json()
       setTeams((currentTeams) => [...currentTeams, createdTeam])
       setFormData({
