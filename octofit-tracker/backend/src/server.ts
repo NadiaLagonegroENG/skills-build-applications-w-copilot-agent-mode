@@ -192,6 +192,7 @@ app.post('/api/users/', writeRateLimit, async (request, response) => {
 
   if (isDatabaseConnected()) {
     const user = await User.create(payload);
+    await refreshDatabaseLeaderboard();
     return response.status(201).json(user);
   }
 
@@ -288,8 +289,13 @@ app.post('/api/activities/', writeRateLimit, async (request, response) => {
       return response.status(400).json({ message: 'The userId must be a valid ObjectId.' });
     }
 
-    const activity = await Activity.create(payload);
     const user = await User.findById(payload.userId).lean();
+
+    if (!user) {
+      return response.status(404).json({ message: 'No user exists for the provided userId.' });
+    }
+
+    const activity = await Activity.create(payload);
     await refreshDatabaseLeaderboard();
     return response.status(201).json({
       ...activity.toObject(),
